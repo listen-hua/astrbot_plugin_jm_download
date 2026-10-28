@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from astrbot_plugin_jm_download.delivery import (
     onebot_file_path,
     validate_remote_jobs_dir,

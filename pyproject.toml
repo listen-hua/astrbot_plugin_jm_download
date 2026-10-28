@@ -6,6 +6,9 @@ exclude = [".dev-deps", ".verification", "dist"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["astrbot_plugin_jm_download"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

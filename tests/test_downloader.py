@@ -10,6 +10,8 @@ from zipfile import ZipFile
 import jmcomic
 import pytest
 import pyzipper
+from PIL import Image
+
 from astrbot_plugin_jm_download.downloader import (
     ArchiveError,
     DownloadedImage,
@@ -18,7 +20,6 @@ from astrbot_plugin_jm_download.downloader import (
     build_archive,
     download_album,
 )
-from PIL import Image
 
 
 class SizedEntity:

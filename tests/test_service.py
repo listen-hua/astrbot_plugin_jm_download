@@ -11,6 +11,7 @@ from zipfile import ZipFile
 import jmcomic
 import pytest
 import pyzipper
+
 from astrbot_plugin_jm_download.delivery import DeliveryTarget
 from astrbot_plugin_jm_download.downloader import ArchiveError, Settings, finish_thread
 from astrbot_plugin_jm_download.service import PLUGIN_NAME, DownloadService

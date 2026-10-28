@@ -8,6 +8,7 @@ from astrbot.api.event import MessageChain
 from astrbot.api.message_components import File
 from astrbot.api.star import Star
 from astrbot.core.star.filter.regex import RegexFilter
+
 from astrbot_plugin_jm_download.delivery import DeliveryTarget
 from astrbot_plugin_jm_download.main import COMMAND_FILTER, JmDownloadPlugin
 

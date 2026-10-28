@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+
 from astrbot_plugin_jm_download.delivery import DeliveryError, DeliveryTarget
 from astrbot_plugin_jm_download.main import JmDownloadPlugin
 from astrbot_plugin_jm_download.service import DownloadService
