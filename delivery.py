@@ -1,7 +1,14 @@
 """Explicit conversation routing and contained NapCat filesystem mapping."""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrbot.api.event import MessageChain
 
 
 class DeliveryError(RuntimeError):
@@ -16,6 +23,9 @@ class DeliveryTarget:
     platform_id: str
     group_id: str = ""
     user_id: str = ""
+    reply: Callable[[MessageChain], Awaitable[None]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 def validate_remote_jobs_dir(value: str) -> None:

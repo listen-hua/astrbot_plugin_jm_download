@@ -114,18 +114,108 @@ async def test_real_file_component_and_original_session(tmp_path):
     )
     plugin = JmDownloadPlugin(context, {})
     path = tmp_path / "has spaces" / "JM123.zip"
+    reply = AsyncMock()
     target = DeliveryTarget(
-        "qq-test:GroupMessage:group-openid", "qq-test", "group-openid"
+        "qq-test:GroupMessage:group-openid", "qq-test", "group-openid", reply=reply
     )
     await plugin._send(target, "done", path)
-    origin, chain = context.send_message.call_args.args
-    assert origin == "qq-test:GroupMessage:group-openid"
+    chain = reply.call_args.args[0]
+    context.send_message.assert_not_awaited()
     assert isinstance(chain, MessageChain)
+    assert chain.use_markdown_ is False
     assert isinstance(chain.chain[1], File)
     assert chain.chain[1].file_ == str(path)
-    context.send_message.return_value = False
+    reply.side_effect = RuntimeError("passive reply expired")
     with pytest.raises(RuntimeError):
         await plugin._send(target, "done", path)
+    with pytest.raises(RuntimeError, match="回复上下文"):
+        await plugin._send(
+            DeliveryTarget(target.origin, target.platform_id), "done", path
+        )
+
+
+@pytest.mark.parametrize("platform_name", ["qq_official", "qq_official_webhook"])
+@pytest.mark.parametrize("group", [True, False])
+async def test_real_official_sdk_preserves_incoming_msg_id(
+    monkeypatch, tmp_path, platform_name, group
+):
+    """Reproduce a bot that accepts passive replies and rejects proactive sends."""
+    import botpy.message
+    from astrbot.api.message_components import Plain
+    from astrbot.core.platform.astrbot_message import AstrBotMessage, MessageMember
+    from astrbot.core.platform.message_type import MessageType
+    from astrbot.core.platform.platform_metadata import PlatformMetadata
+    from astrbot.core.platform.sources.qqofficial.qqofficial_message_event import (
+        QQOfficialMessageEvent,
+    )
+
+    async def post(**payload):
+        assert payload.get("msg_id") == "incoming-command-id"
+        assert (payload.get("group_openid") if group else payload.get("openid")) == (
+            "original-group" if group else "original-user"
+        )
+        return {"id": "reply-id"}
+
+    api = SimpleNamespace(post_group_message=AsyncMock(side_effect=post))
+    api.post_c2c_message = AsyncMock(side_effect=post)
+
+    async def request(route, json):
+        return await api.post_c2c_message(**json)
+
+    api._http = SimpleNamespace(request=AsyncMock(side_effect=request))
+    message = AstrBotMessage()
+    message.type = MessageType.GROUP_MESSAGE if group else MessageType.FRIEND_MESSAGE
+    message.sender = MessageMember(user_id="original-user", nickname="fixture")
+    message.group_id = "original-group" if group else ""
+    message.message_id = "incoming-command-id"
+    message.message_str = "/jm123"
+    message.message = [Plain("/jm123")]
+    raw_type = botpy.message.GroupMessage if group else botpy.message.C2CMessage
+    message.raw_message = raw_type(
+        api,
+        "event-id",
+        {
+            "id": message.message_id,
+            "group_openid": "original-group",
+            "author": {
+                "member_openid": "original-user",
+                "user_openid": "original-user",
+            },
+        },
+    )
+    event = QQOfficialMessageEvent(
+        "/jm123",
+        message,
+        PlatformMetadata(platform_name, "test", "qq-test"),
+        "independent_original-group" if group else "original-user",
+        SimpleNamespace(api=api),
+    )
+    platform = SimpleNamespace(meta=lambda: SimpleNamespace(name=platform_name))
+    context = SimpleNamespace(
+        get_platform_inst=Mock(return_value=platform),
+        send_message=AsyncMock(
+            side_effect=AssertionError("Proactive sends are denied")
+        ),
+    )
+    plugin = JmDownloadPlugin(context, {})
+    plugin.service = Mock()
+    plugin.service.reserve.return_value = (None, "accepted")
+    await plugin.on_jm(event)
+    target = plugin.service.reserve.call_args.args[2]
+    assert target.reply == event.send
+    monkeypatch.setattr(
+        QQOfficialMessageEvent,
+        "upload_group_and_c2c_media",
+        AsyncMock(return_value={"file_info": "fixture-file"}),
+    )
+    archive = tmp_path / "JM123.zip"
+    archive.write_bytes(b"synthetic zip fixture")
+    await plugin._send(target, "download completed", archive)
+    await plugin._send(target, "failure notification", None)
+    method = api.post_group_message if group else api.post_c2c_message
+    assert method.await_count >= 3
+    assert any(call.kwargs.get("msg_type") == 7 for call in method.call_args_list)
+    context.send_message.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

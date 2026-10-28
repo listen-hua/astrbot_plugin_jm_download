@@ -21,6 +21,7 @@ COMMAND = re.compile(r"/?jm\s*([0-9]+)", re.IGNORECASE)
 HELP = (
     "用法：/jm123456 或 /jm 123456。编号必须为正整数；"
     "下载全部章节后返回 ZIP。每人最多一个未完成任务。"
+    "再次发送同一编号可查看进度或领取发送失败的 ZIP。"
 )
 SUPPORTED_PLATFORMS = {"qq_official", "qq_official_webhook", "aiocqhttp"}
 
@@ -70,6 +71,7 @@ class JmDownloadPlugin(Star):
             event.get_platform_id(),
             str(event.get_group_id() or ""),
             str(event.get_sender_id()),
+            reply=event.send if event.get_platform_name() != "aiocqhttp" else None,
         )
         job, text = self.service.reserve(album_id, user_key, target)
         try:
@@ -96,6 +98,20 @@ class JmDownloadPlugin(Star):
         platform = self.context.get_platform_inst(target.platform_id)
         if platform is None:
             raise DeliveryError("原机器人连接已不可用，请检查平台连接。")
+        if platform.meta().name in {"qq_official", "qq_official_webhook"}:
+            if target.reply is None:
+                raise DeliveryError("缺少原消息回复上下文，请重新发送 /jm编号。")
+            components = [Plain(text)]
+            if archive is not None:
+                components.append(File(name=archive.name, file=str(archive)))
+            try:
+                await target.reply(MessageChain(chain=components).use_markdown(False))
+            except Exception as exc:
+                raise DeliveryError(
+                    "QQ 官方回复失败，可能已超过回复窗口或文件权限不足；"
+                    "请再次发送同一 /jm编号 领取已完成文件。"
+                ) from exc
+            return
         if archive is not None and platform.meta().name == "aiocqhttp":
             if self.service is None:
                 raise RuntimeError("Download storage is unavailable")

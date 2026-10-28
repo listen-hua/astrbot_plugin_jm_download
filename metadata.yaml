@@ -1,7 +1,7 @@
 name: astrbot_plugin_jm_download
 display_name: JM 下载
 desc: 使用 /jm编号 下载整本并将 ZIP 发回当前会话。
-version: v1.1.0
+version: v1.1.1
 author: 黎沈华(listen-hua)
 repo: https://github.com/listen-hua/astrbot_plugin_jm_download
 short_desc: QQ 官方和 NapCat 的整本下载、顺序整理与可选加密 ZIP 回传

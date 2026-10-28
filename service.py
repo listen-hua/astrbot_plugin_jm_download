@@ -45,6 +45,8 @@ class Job:
     user_key: str
     target: DeliveryTarget
     control: jmcomic.DownloadControl
+    archive: Path | None = None
+    phase: str = "排队中"
 
 
 class DownloadService:
@@ -70,6 +72,31 @@ class DownloadService:
         self.slots = asyncio.Semaphore(settings.max_concurrent)
         self.closing = False
         self.sweeper: asyncio.Task | None = None
+        # In-memory receipts contain routing strings only, never event callbacks.
+        self.retained: dict[tuple[str, ...], tuple[str, float]] = {}
+
+    @staticmethod
+    def _receipt_key(
+        album_id: str, user_key: str, target: DeliveryTarget
+    ) -> tuple[str, ...]:
+        """Bind a retained ZIP to its requesting user and exact conversation.
+
+        Args:
+            album_id: Requested album identifier.
+            user_key: Original platform instance and sender.
+            target: Delivery routing; the reply callback is deliberately excluded.
+
+        Returns:
+            Immutable routing strings suitable for the in-memory receipt index.
+        """
+        return (
+            album_id,
+            user_key,
+            target.origin,
+            target.platform_id,
+            target.group_id,
+            target.user_id,
+        )
 
     async def initialize(self) -> None:
         """Clean abandoned jobs before accepting requests and start expiry checks."""
@@ -94,6 +121,15 @@ class DownloadService:
         """
         if self.closing:
             return None, "下载插件正在重载，请稍后重试。"
+        for active in self.jobs.values():
+            if (
+                active.user_key == user_key
+                and active.album_id == album_id
+                and active.target == target
+            ):
+                # A new incoming command renews the official passive reply context.
+                active.target = target
+                return None, f"JM{album_id} {active.phase}，请等待；不会重复下载。"
         if user_key in self.users:
             return None, "你已有一个未完成的下载任务，请等待完成。"
         now = time.monotonic()
@@ -109,14 +145,43 @@ class DownloadService:
         if len(self.jobs) >= self.settings.max_concurrent + self.settings.max_queue:
             return None, "下载队列已满，请稍后重试。"
         ahead = max(0, len(self.jobs) - self.settings.max_concurrent + 1)
+        key = self._receipt_key(album_id, user_key, target)
+        self.retained = {
+            key: receipt
+            for key, receipt in self.retained.items()
+            if receipt[1] > time.time()
+        }
+        receipt = self.retained.get(key)
+        archive = None
+        if receipt:
+            candidate = self.jobs_root / receipt[0] / f"JM{album_id}.zip"
+            if candidate.is_file() and candidate.resolve().is_relative_to(
+                self.jobs_root
+            ):
+                archive = candidate
+            else:
+                self.retained.pop(key, None)
         job = Job(
-            f"job-{uuid4().hex}", album_id, user_key, target, jmcomic.DownloadControl()
+            receipt[0] if archive else f"job-{uuid4().hex}",
+            album_id,
+            user_key,
+            target,
+            jmcomic.DownloadControl(),
+            archive,
         )
         self.jobs[job.id] = job
         self.users.add(user_key)
         self.cooldowns[user_key] = now + self.settings.cooldown_seconds
         state = f"已排队，前面有 {ahead} 个等待任务" if ahead else "已受理"
-        return job, f"JM{album_id} {state}，完成后将 ZIP 发送到本会话。"
+        if archive:
+            return (
+                job,
+                f"JM{album_id} 已受理领取，将重新发送已完成的 ZIP，不会重复下载。",
+            )
+        return job, (
+            f"JM{album_id} {state}，完成后将 ZIP 发送到本会话。"
+            "等待较久时可再次发送同一命令，查看进度或领取已完成文件。"
+        )
 
     def launch(self, job: Job) -> None:
         """Start a reserved job after the command acknowledgement was attempted.
@@ -128,40 +193,54 @@ class DownloadService:
             self.jobs.pop(job.id, None)
             self.users.discard(job.user_key)
             return
-        if job.id not in self.tasks:
+        if job.id not in self.tasks or self.tasks[job.id].done():
             task = asyncio.create_task(self._run(job), name=f"jm-{job.album_id}")
             self.tasks[job.id] = task
-            task.add_done_callback(lambda _: self.tasks.pop(job.id, None))
+
+            def forget(finished):
+                if self.tasks.get(job.id) is finished:
+                    self.tasks.pop(job.id, None)
+
+            task.add_done_callback(forget)
 
     async def _run(self, job: Job) -> None:
         directory = self.jobs_root / job.id
-        retain = False
+        retain = job.archive is not None
         try:
             async with self.slots:
-                directory.mkdir()
-                marker = directory / ".job.json"
-                marker.write_text(
-                    json.dumps({"plugin": PLUGIN_NAME, "retained_at": None}),
-                    encoding="utf-8",
-                )
                 images = directory / "images"
-                archive = directory / f"JM{job.album_id}.zip"
-                # Shield the library task, signal cancellation, then drain its writes.
-                download = asyncio.create_task(
-                    self.backend(job.album_id, images, self.settings, job.control)
-                )
-                try:
-                    paths = await asyncio.wait_for(
-                        asyncio.shield(download), self.settings.download_timeout_seconds
+                archive = job.archive or directory / f"JM{job.album_id}.zip"
+                if job.archive is None:
+                    directory.mkdir()
+                    marker = directory / ".job.json"
+                    marker.write_text(
+                        json.dumps({"plugin": PLUGIN_NAME, "retained_at": None}),
+                        encoding="utf-8",
                     )
-                except (TimeoutError, asyncio.CancelledError):
-                    job.control.cancel("download timed out or plugin stopped")
-                    download.cancel()
-                    await drain_task(download)
-                    raise
-                await finish_thread(
-                    build_archive, paths, images, archive, self.settings.zip_password
-                )
+                    job.phase = "正在下载"
+                    self.logger.info("Download started for %s", job.id)
+                    download = asyncio.create_task(
+                        self.backend(job.album_id, images, self.settings, job.control)
+                    )
+                    try:
+                        paths = await asyncio.wait_for(
+                            asyncio.shield(download),
+                            self.settings.download_timeout_seconds,
+                        )
+                    except (TimeoutError, asyncio.CancelledError):
+                        job.control.cancel("download timed out or plugin stopped")
+                        download.cancel()
+                        await drain_task(download)
+                        raise
+                    job.phase = "正在打包"
+                    self.logger.info("Archive creation started for %s", job.id)
+                    await finish_thread(
+                        build_archive,
+                        paths,
+                        images,
+                        archive,
+                        self.settings.zip_password,
+                    )
                 retain = True
                 if archive.stat().st_size > self.settings.max_zip_mib * 1024 * 1024:
                     await self._notify(
@@ -173,6 +252,8 @@ class DownloadService:
                     )
                     return
                 try:
+                    job.phase = "正在发送文件"
+                    self.logger.info("ZIP delivery started for %s", job.id)
                     await asyncio.wait_for(
                         self.sender(
                             job.target, f"JM{job.album_id} 下载完成。", archive
@@ -189,10 +270,13 @@ class DownloadService:
                     await self._notify(
                         job,
                         f"JM{job.album_id} 下载完成，但 ZIP 发送失败。"
-                        f"文件保留 {self.settings.retention_hours} 小时，" + reason,
+                        f"文件保留 {self.settings.retention_hours} 小时，"
+                        + reason
+                        + " 可在本会话再次发送同一 /jm编号 领取，不会重复下载。",
                     )
                     return
                 retain = False
+                self.logger.info("ZIP delivery completed for %s", job.id)
         except asyncio.CancelledError:
             job.control.cancel("plugin stopped")
             raise
@@ -242,9 +326,16 @@ class DownloadService:
                         self.logger.warning(
                             "Retained ZIP for %s at %s", job.id, directory
                         )
+                        self.retained[
+                            self._receipt_key(job.album_id, job.user_key, job.target)
+                        ] = (job.id, time.time() + self.settings.retention_hours * 3600)
                         if (directory / "images").exists():
                             await finish_thread(shutil.rmtree, directory / "images")
                     else:
+                        self.retained.pop(
+                            self._receipt_key(job.album_id, job.user_key, job.target),
+                            None,
+                        )
                         await finish_thread(self._remove_owned, directory)
             except Exception:
                 self.logger.exception("Job cleanup failed for %s", job.id)

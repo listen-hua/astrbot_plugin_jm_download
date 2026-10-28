@@ -12,7 +12,7 @@ import jmcomic
 import pytest
 import pyzipper
 
-from astrbot_plugin_jm_download.delivery import DeliveryTarget
+from astrbot_plugin_jm_download.delivery import DeliveryError, DeliveryTarget
 from astrbot_plugin_jm_download.downloader import ArchiveError, Settings, finish_thread
 from astrbot_plugin_jm_download.service import PLUGIN_NAME, DownloadService
 
@@ -345,3 +345,147 @@ async def test_password_reaches_archive_without_leaking_into_status_or_metadata(
     assert password not in (directory / ".job.json").read_text()
     assert password not in " ".join(notices)
     assert password not in caplog.text
+
+
+async def test_repeated_command_refreshes_only_same_user_and_conversation(factory):
+    from unittest.mock import AsyncMock
+
+    service = await factory()
+    old = DeliveryTarget("p:group:g", "p", "g", "u", reply=AsyncMock())
+    job, _ = service.reserve("123", "p:u", old)
+    job.phase = "正在下载"
+    new = DeliveryTarget("p:group:g", "p", "g", "u", reply=AsyncMock())
+    duplicate, text = service.reserve("123", "p:u", new)
+    assert duplicate is None and "正在下载" in text
+    assert job.target is new and len(service.jobs) == 1
+    other = DeliveryTarget("p:group:other", "p", "other", "u", reply=AsyncMock())
+    assert "未完成" in service.reserve("123", "p:u", other)[1]
+    assert job.target is new
+
+
+async def test_failed_file_is_retrieved_with_fresh_reply_without_download(factory):
+    from unittest.mock import AsyncMock
+
+    backend = AsyncMock(
+        side_effect=lambda album, images, *_: make_images(images, album)
+    )
+    old_reply, new_reply = AsyncMock(), AsyncMock()
+    deliveries = []
+
+    async def sender(target, text, archive):
+        if archive:
+            deliveries.append(target.reply)
+            if len(deliveries) == 1:
+                raise DeliveryError("reply window expired")
+            assert archive.is_file()
+
+    service = await factory(
+        backend=backend, sender=sender, settings=replace(Settings(), cooldown_seconds=0)
+    )
+    old = DeliveryTarget("p:group:g", "p", "g", "u", reply=old_reply)
+    first, _ = service.reserve("123", "p:u", old)
+    service.launch(first)
+    await finish_jobs(service)
+    archive = service.jobs_root / first.id / "JM123.zip"
+    assert archive.is_file() and service.retained
+    assert all(isinstance(part, str) for key in service.retained for part in key)
+    new = DeliveryTarget("p:group:g", "p", "g", "u", reply=new_reply)
+    retry, text = service.reserve("123", "p:u", new)
+    assert "领取" in text and retry.archive == archive
+    service.launch(retry)
+    await finish_jobs(service)
+    assert deliveries == [old_reply, new_reply]
+    backend.assert_awaited_once()
+    assert not archive.exists() and not service.retained
+
+
+@pytest.mark.parametrize("change", ["user", "group", "platform", "album"])
+async def test_retained_receipt_cannot_be_claimed_from_another_route(factory, change):
+    async def sender(target, text, archive):
+        if archive:
+            raise DeliveryError("expired")
+
+    service = await factory(
+        sender=sender, settings=replace(Settings(), cooldown_seconds=0)
+    )
+    target = DeliveryTarget("p:group:g", "p", "g", "u")
+    job, _ = service.reserve("123", "p:u", target)
+    service.launch(job)
+    await finish_jobs(service)
+    user, album = "p:u", "123"
+    if change == "user":
+        user, target = "p:v", replace(target, user_id="v")
+    elif change == "group":
+        target = replace(target, origin="p:group:h", group_id="h")
+    elif change == "platform":
+        user, target = "other:u", replace(target, platform_id="other")
+    else:
+        album = "456"
+    other, _ = service.reserve(album, user, target)
+    assert other is not None and other.archive is None and other.id != job.id
+
+
+@pytest.mark.parametrize("missing", [True, False])
+async def test_missing_or_expired_receipt_is_not_reused(factory, missing):
+    async def sender(target, text, archive):
+        if archive:
+            raise DeliveryError("expired")
+
+    service = await factory(
+        sender=sender, settings=replace(Settings(), cooldown_seconds=0)
+    )
+    target = DeliveryTarget("p:group:g", "p", "g", "u")
+    job, _ = service.reserve("123", "p:u", target)
+    service.launch(job)
+    await finish_jobs(service)
+    if missing:
+        (service.jobs_root / job.id / "JM123.zip").unlink()
+    else:
+        key = service._receipt_key("123", "p:u", target)
+        service.retained[key] = (job.id, time.time() - 1)
+    retry, _ = service.reserve("123", "p:u", target)
+    assert retry.archive is None and retry.id != job.id
+
+
+async def test_cancelled_queued_receipt_preserves_completed_zip(factory):
+    async def sender(target, text, archive):
+        if archive:
+            raise DeliveryError("expired")
+
+    service = await factory(
+        sender=sender, settings=replace(Settings(), cooldown_seconds=0)
+    )
+    target = DeliveryTarget("p:group:g", "p", "g", "u")
+    first, _ = service.reserve("123", "p:u", target)
+    service.launch(first)
+    await finish_jobs(service)
+    archive = service.jobs_root / first.id / "JM123.zip"
+    await service.slots.acquire()
+    retry, _ = service.reserve("123", "p:u", target)
+    service.launch(retry)
+    await asyncio.sleep(0)
+    await service.terminate()
+    assert archive.is_file()
+    assert json.loads((archive.parent / ".job.json").read_text())["retained_at"]
+
+
+async def test_failed_receipt_delivery_stays_available_for_another_attempt(factory):
+    from unittest.mock import AsyncMock
+
+    backend = AsyncMock(
+        side_effect=lambda album, images, *_: make_images(images, album)
+    )
+
+    async def sender(target, text, archive):
+        if archive:
+            raise DeliveryError("expired")
+
+    service = await factory(backend, sender, replace(Settings(), cooldown_seconds=0))
+    target = DeliveryTarget("p:group:g", "p", "g", "u")
+    for _ in range(2):
+        job, _ = service.reserve("123", "p:u", target)
+        service.launch(job)
+        await finish_jobs(service)
+    backend.assert_awaited_once()
+    retry, _ = service.reserve("123", "p:u", target)
+    assert retry.archive.is_file() and service.retained

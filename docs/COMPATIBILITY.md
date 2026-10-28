@@ -2,7 +2,9 @@
 
 基线：Python 3.12、AstrBot ≥4.29.3 且 <5。自动化固定 AstrBot 4.29.3；声明范围内的其他版本未逐一实测。测试不需要模型提供商、QQ 凭据或真实下载内容。
 
-2026-10-28：本机 78 项测试通过；[公开 CI 验证记录](https://github.com/listen-hua/astrbot_plugin_jm_download/actions/runs/40648019183) 中 Windows、Linux 完整测试及容器加载检查全部通过。下表记录这一版本的实际范围。
+v1.1.1 增加 QQ 官方真实 SDK 事件回归：模拟拒绝主动消息的 QQ API，检查受理、完成文件和失败通知均保留原消息 `msg_id`；覆盖 WebSocket / Webhook 及群聊 / 私聊。另覆盖刷新回复上下文、保留 ZIP 领取和跨用户 / 会话隔离。此为离线接口验证，修复后的真实 QQ 收发仍需再次验收。
+
+v1.1.0 基线记录（2026-10-28）：本机 78 项测试通过；[公开 CI 验证记录](https://github.com/listen-hua/astrbot_plugin_jm_download/actions/runs/40648019183) 中 Windows、Linux 完整测试及容器加载检查全部通过。下表为该基线的实际范围；v1.1.1 的跨平台结果见对应版本的 Verify / Release 工作流。
 
 | 环境 / 项目 | 验证方式 | 当前结果 |
 | --- | --- | --- |
