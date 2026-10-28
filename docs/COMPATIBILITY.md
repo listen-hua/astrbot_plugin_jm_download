@@ -2,17 +2,19 @@
 
 基线：Python 3.12、AstrBot ≥4.29.3 且 <5。自动化固定 AstrBot 4.29.3；声明范围内的其他版本未逐一实测。测试不需要模型提供商、QQ 凭据或真实下载内容。
 
+2026-10-28：本机 78 项测试通过；[公开 CI 验证记录](https://github.com/listen-hua/astrbot_plugin_jm_download/actions/runs/40648019183) 中 Windows、Linux 完整测试及容器加载检查全部通过。下表记录这一版本的实际范围。
+
 | 环境 / 项目 | 验证方式 | 当前结果 |
 | --- | --- | --- |
 | Windows / Python 3.12 / AstrBot 4.29.3 | 本机真实 SDK、完整离线测试、源码与 ZIP 初始化 | 已验证；发布 CI 再次运行 |
-| Linux / Python 3.12 / AstrBot 4.29.3 | GitHub Actions 干净 runner 安装与完整测试 | 以仓库 Verify / Release 工作流实际结果为准 |
-| Python 3.12 Linux 容器 | CI 容器中安装、构建、源码及 ZIP 加载 | 以工作流 container-smoke 实际结果为准 |
+| Linux / Python 3.12 / AstrBot 4.29.3 | GitHub Actions 干净 runner 安装与完整测试 | 已通过 78 项测试、代码检查及源码 / ZIP 加载 |
+| Python 3.12 Linux 容器 | CI 容器中安装、构建、源码及 ZIP 加载 | container-smoke 已通过 |
 | NapCat 群聊 / 私聊接口 | 模拟已连接 OneBot 客户端，验证参数、响应和失败保留 | 自动化覆盖；真实 QQ 验收待完成 |
 | 多机器人与独立群会话 | 两个模拟客户端及含独立前缀的原会话 | 自动化覆盖，只选择原平台及原群 / 用户 |
 | Docker 共享目录 | POSIX / Windows 映射、越界和不可访问文件测试 | 本地自动化覆盖；真实双容器 NapCat 待验收 |
 | 顺序及 AES 密码 | 12 章节、页码跨位数、乱序记录、普通和中文密码 | 自动化覆盖，测试图片内容一致 |
 | 无 LLM 命令、队列、取消、保留 | 真实 SDK 事件与服务层模拟 | 自动化覆盖 |
-| Windows 含空格路径、升级与卸载 | 临时目录重复安装、配置数据快照、生命周期停止 | 自动化覆盖 |
+| Windows 含空格路径、升级与卸载 | 临时目录重复安装、配置数据快照、生命周期停止 | Windows CI 已通过 78 项测试及源码 / ZIP 加载 |
 | QQ 官方 WebSocket / Webhook | SDK 消息组件与会话路由 | 自动化覆盖；v1.1.0 真实 QQ 完整验收待完成 |
 
 每次提交的验证记录见 [Actions](https://github.com/listen-hua/astrbot_plugin_jm_download/actions)。绿色自动化结果表示列出的离线和加载检查通过，不代表 QQ 账号、下载站点、远端文件权限或平台限额已验证。
