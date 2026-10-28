@@ -20,8 +20,9 @@ def builder(monkeypatch):
 
 
 def test_reproducible_package_checksum_and_content(builder, tmp_path):
-    archive = builder.build_package(ROOT, tmp_path / "first", "v1.1.0")
-    repeated = builder.build_package(ROOT, tmp_path / "second", "v1.1.0")
+    version = builder.metadata(ROOT)["version"]
+    archive = builder.build_package(ROOT, tmp_path / "first", version)
+    repeated = builder.build_package(ROOT, tmp_path / "second", version)
     assert archive.read_bytes() == repeated.read_bytes()
     assert archive.stat().st_size < 16_000_000
     assert (archive.parent / "SHA256SUMS").read_text().split()[0] == hashlib.sha256(
