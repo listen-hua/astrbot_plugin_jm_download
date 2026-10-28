@@ -1,0 +1,13 @@
+{
+  "max_concurrent": {"description": "同时处理的任务数", "type": "int", "default": 1, "hint": "1～8；修改配置后重载插件生效。"},
+  "max_queue": {"description": "最多排队任务数", "type": "int", "default": 5, "hint": "0～100；不包含正在处理的任务。"},
+  "cooldown_seconds": {"description": "每位用户的命令冷却秒数", "type": "int", "default": 60, "hint": "0～3600；同一用户始终最多有一个未完成任务。"},
+  "download_timeout_seconds": {"description": "单次下载超时秒数", "type": "int", "default": 600, "hint": "5～3600；超时后等待底层写盘收尾再清理。"},
+  "max_zip_mib": {"description": "ZIP 发送大小上限（MiB）", "type": "int", "default": 50, "hint": "1～1024；插件自身限制，不能扩大 QQ 接口实际允许的大小。"},
+  "zip_password": {"description": "解压密码", "type": "string", "default": "", "secret": true, "hint": "留空不加密；填写后新任务生成 AES-256 加密 ZIP，使用 7-Zip / WinRAR 等解压。保存并重载后生效。"},
+  "onebot_remote_jobs_dir": {"description": "NapCat 中的共享任务目录", "type": "string", "default": "", "hint": "留空使用本机同路径。分离容器部署时填写 NapCat 内对应 jobs 共享卷的绝对路径；需挂载相同文件，不能填写 URL。"},
+  "retention_hours": {"description": "发送失败或过大 ZIP 的保留小时数", "type": "int", "default": 24, "hint": "1～168；管理员从本机插件数据目录获取。"},
+  "proxy": {"description": "下载代理", "type": "string", "default": "", "hint": "留空沿用系统代理；例如 http://127.0.0.1:7890。"},
+  "api_domains": {"description": "JM API 域名", "type": "list", "default": [], "hint": "留空使用 jmcomic 默认域名；需要时只填写 API 域名，不包含 https:// 或路径。"}
+}
+

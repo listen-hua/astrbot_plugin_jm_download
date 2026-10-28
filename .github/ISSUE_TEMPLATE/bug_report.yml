@@ -1,0 +1,32 @@
+name: 问题反馈
+description: 报告插件安装、下载或文件发送问题
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: 插件、AstrBot、Python 和 NapCat 版本
+    validations:
+      required: true
+  - type: dropdown
+    id: adapter
+    attributes:
+      label: 平台适配器
+      options:
+        - QQ 官方 WebSocket
+        - QQ 官方 Webhook
+        - NapCat / aiocqhttp
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 部署方式、复现步骤、预期与实际行为
+      description: 说明 Windows / Linux / Docker，以及共享卷映射方式。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏的错误日志
+      description: 请移除密钥、令牌、密码、QQ 号和私人路径，不要上传作品或含敏感内容的截图。
+      render: text

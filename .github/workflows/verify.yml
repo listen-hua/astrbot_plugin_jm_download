@@ -1,0 +1,43 @@
+name: Verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      ASTRBOT_REQUIRE_SDK_TESTS: '1'
+      ASTRBOT_DISABLE_METRICS: '1'
+      ASTRBOT_ROOT: ${{ runner.temp }}/jm-sdk-test
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-ci.txt
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m pytest -q --tb=short
+      - run: python scripts/build.py
+      - run: python scripts/smoke_install.py
+  container-smoke:
+    runs-on: ubuntu-latest
+    container: python:3.12-slim
+    env:
+      ASTRBOT_DISABLE_METRICS: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - run: python -m pip install -r requirements-ci.txt
+      - run: python scripts/build.py
+      - run: python scripts/smoke_install.py
