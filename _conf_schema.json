@@ -10,4 +10,3 @@
   "proxy": {"description": "下载代理", "type": "string", "default": "", "hint": "留空沿用系统代理；例如 http://127.0.0.1:7890。"},
   "api_domains": {"description": "JM API 域名", "type": "list", "default": [], "hint": "留空使用 jmcomic 默认域名；需要时只填写 API 域名，不包含 https:// 或路径。"}
 }
-
