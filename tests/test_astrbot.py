@@ -84,6 +84,27 @@ def test_actual_regex_filter_does_not_capture_other_commands():
         assert not regex.filter(Event(text), {})
 
 
+@pytest.mark.parametrize("group_id", ["456", ""])
+async def test_onebot_command_captures_original_route_without_llm(group_id):
+    plugin = JmDownloadPlugin(SimpleNamespace(), {})
+    plugin.service = Mock()
+    plugin.service.reserve.return_value = (None, "accepted")
+    event = Event("/jm123")
+    event.unified_msg_origin = "onebot-b:GroupMessage:unique_456"
+    event.get_platform_name = lambda: "aiocqhttp"
+    event.get_platform_id = lambda: "onebot-b"
+    event.get_group_id = lambda: group_id
+    event.get_sender_id = lambda: "789"
+    await plugin.on_jm(event)
+    plugin.service.reserve.assert_called_once_with(
+        "123",
+        "onebot-b:789",
+        DeliveryTarget(event.unified_msg_origin, "onebot-b", group_id, "789"),
+    )
+    event.should_call_llm.assert_called_once_with(False)
+    event.stop_event.assert_called_once()
+
+
 async def test_real_file_component_and_original_session(tmp_path):
     platform = SimpleNamespace(meta=lambda: SimpleNamespace(name="qq_official"))
     context = SimpleNamespace(

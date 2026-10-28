@@ -1,11 +1,15 @@
 """OneBot file actions use captured recipients and the selected platform only."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from astrbot_plugin_jm_download.delivery import DeliveryError, DeliveryTarget
 from astrbot_plugin_jm_download.main import JmDownloadPlugin
+from astrbot_plugin_jm_download.service import DownloadService
+
+from .test_downloader import make_images
 
 
 @pytest.fixture
@@ -109,3 +113,36 @@ async def test_status_failure_after_successful_upload_does_not_repeat_file(plugi
     instance.context.send_message.side_effect = RuntimeError("status failed")
     await instance._send(DeliveryTarget("umo", "onebot-a", "456"), "done", archive)
     clients["onebot-a"].call_action.assert_awaited_once()
+
+
+async def test_onebot_failure_retains_zip_and_explains_cause(plugin, tmp_path):
+    instance, clients, _ = plugin
+
+    async def backend(album_id, images, settings, control):
+        return make_images(images, album_id)
+
+    clients["onebot-a"].call_action.side_effect = RuntimeError(
+        "remote permission denied"
+    )
+    service = DownloadService(
+        tmp_path / "runtime",
+        instance.settings,
+        instance._send,
+        instance.logger,
+        backend,
+    )
+    instance.service = service
+    await service.initialize()
+    try:
+        target = DeliveryTarget("onebot-a:GroupMessage:unique_456", "onebot-a", "456")
+        job, _ = service.reserve("123", "onebot-a:789", target)
+        service.launch(job)
+        await asyncio.gather(*service.tasks.values())
+        assert (service.jobs_root / job.id / "JM123.zip").is_file()
+        assert not (service.jobs_root / job.id / "images").exists()
+        notice = instance.context.send_message.call_args.args[1].chain[0].text
+        assert "OneBot" in notice and "保留" in notice
+        clients["onebot-a"].call_action.assert_awaited_once()
+    finally:
+        await service.terminate()
+    assert (service.jobs_root / job.id / "JM123.zip").is_file()
